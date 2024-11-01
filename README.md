@@ -4,6 +4,8 @@
 
 Frappe app to make file upload automatically upload and read from s3.
 
+[![Whatsapp Video](https://img.youtube.com/vi/hutJkHf8e2o/0.jpg)](https://www.youtube.com/watch?v=hutJkHf8e2o)
+
 #### Features.
 
 1. Upload both public and private files to s3.
@@ -29,6 +31,30 @@ Frappe app to make file upload automatically upload and read from s3.
     to be migrated to s3.
 4. Delete From Cloud when selected deletes the file form s3 bucket whenever a file
     is deleted from ui. By default the Delete from cloud will be unchecked.
+
+##### S3 Configuration
+
+1. Permission Overview (Based on requirements)
+
+* When createing the bucket make sure that ACL is enabled
+* Objects can be public
+  * The bucket is not public but anyone with appropriate permissions can grant public access to objects.
+
+2. [Block public access (bucket settings)](https://docs.aws.amazon.com/console/s3/publicaccess)
+
+* Block all public Access - `Off`
+
+    * Block public access to buckets and objects granted through new access control lists (ACLs) - `Off`
+
+    * Block public access to buckets and objects granted through any access control lists (ACLs) - `Off`
+
+    * Block public access to buckets and objects granted through any access control lists (ACLs) - `Off`
+
+    * Block public and cross-account access to buckets and objects through any public bucket or access point policies - `Off`
+
+3. [Bucket policy](https://docs.aws.amazon.com/console/s3/access-policy-language-overview)
+
+`JSON{ "Version": "2012-10-17", "Statement": [ { "Sid": "AddCannedAcl", "Effect": "Allow", "Principal": { "AWS": "arn:aws:iam::<xyz>:user/<S3_USERNAME>" }, "Action": [ "s3:PutObject", "s3:PutObjectAcl" ], "Resource": "arn:aws:s3:::<BUCKET_NAME>/*", "Condition": { "StringEquals": { "s3:x-amz-acl": "public-read" } } } ]}`
 
 #### License
 
