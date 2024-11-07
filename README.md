@@ -19,7 +19,7 @@ Frappe app to make file upload automatically upload and read from s3.
 
 #### Installation.
 
-1. bench get-app git@github.com:gaia-family/frappe-attachments-s3-private-fork.git
+1. bench get-app git@github.com:gaia-family/frappe_s3_attachment.git
 2. bench install-app frappe_s3_attachment
 
 #### Configuration Setup.
