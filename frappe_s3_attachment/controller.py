@@ -185,8 +185,8 @@ class S3Operations(object):
                 'Key': key,
 
         }
-        if file_name:
-            params['ResponseContentDisposition'] = 'filename={}'.format(file_name)
+        # if file_name:
+        #     params['ResponseContentDisposition'] = 'filename={}'.format(file_name)
 
         url = self.S3_CLIENT.generate_presigned_url(
             'get_object',
@@ -232,9 +232,9 @@ def file_upload_to_s3(doc, method):
         frappe.db.sql("""UPDATE `tabFile` SET file_url=%s, folder=%s,
             old_parent=%s, content_hash=%s WHERE name=%s""", (
             file_url, 'Home/Attachments', 'Home/Attachments', key, doc.name))
-        
+
         doc.file_url = file_url
-        
+
         if parent_doctype and frappe.get_meta(parent_doctype).get('image_field'):
             frappe.db.set_value(parent_doctype, parent_name, frappe.get_meta(parent_doctype).get('image_field'), file_url)
 
