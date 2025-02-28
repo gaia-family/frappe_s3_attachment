@@ -185,8 +185,6 @@ class S3Operations(object):
                 'Key': key,
 
         }
-        # if file_name:
-        #     params['ResponseContentDisposition'] = 'filename={}'.format(file_name)
 
         url = self.S3_CLIENT.generate_presigned_url(
             'get_object',
