@@ -32,6 +32,31 @@ Frappe app to make file upload automatically upload and read from s3.
 4. Delete From Cloud when selected deletes the file form s3 bucket whenever a file
     is deleted from ui. By default the Delete from cloud will be unchecked.
 
+#### Public files
+
+Unticking "Is Private" does not by itself make a file public. A File is uploaded as a
+public object only when every one of these holds; otherwise it is stored private, with a
+signed-URL `file_url`:
+
+1. An installed app lists its (DocType, field) pair in the `s3_public_asset_fields` hook.
+   With no hook configured, nothing is ever public.
+
+    ```python
+    # your_app/hooks.py
+    s3_public_asset_fields = {
+        "Clinic": ["logo", "image"],
+        "Letter Head": ["image", "footer_image"],
+    }
+    ```
+
+2. The record it is attached to exists and the uploader can write to it (for a record
+   not yet saved, the uploader can create that DocType).
+3. It is a local upload, not a reference to a remote URL.
+4. Its bytes decode as a PNG, JPEG or WebP image of 5 MB or less. SVG is not accepted.
+   An upload to an allowlisted field that fails this check is rejected with an error.
+
+An existing private File cannot be switched to public; upload it again instead.
+
 ##### S3 Configuration
 
 1. Permission Overview (Based on requirements)

@@ -16,6 +16,8 @@ import frappe
 
 import magic
 
+from frappe_s3_attachment.public_assets import should_store_public
+
 
 class S3Operations(object):
 
@@ -207,17 +209,19 @@ def file_upload_to_s3(doc, method):
     parent_name = doc.attached_to_name
     ignore_s3_upload_for_doctype = frappe.local.conf.get('ignore_s3_upload_for_doctype') or ['Data Import']
     if parent_doctype not in ignore_s3_upload_for_doctype:
+        # Where Frappe wrote the bytes depends on the flag the File arrived with.
         if not doc.is_private:
             file_path = site_path + '/public' + path
         else:
             file_path = site_path + path
+        is_private = 0 if should_store_public(doc, file_path) else 1
         key = s3_upload.upload_files_to_s3_with_key(
             file_path, doc.file_name,
-            doc.is_private, parent_doctype,
+            is_private, parent_doctype,
             parent_name
         )
 
-        if doc.is_private:
+        if is_private:
             method = "frappe_s3_attachment.controller.generate_file"
             file_url = """/api/method/{0}?key={1}&file_name={2}""".format(method, key, doc.file_name)
         else:
@@ -228,10 +232,11 @@ def file_upload_to_s3(doc, method):
             )
         os.remove(file_path)
         frappe.db.sql("""UPDATE `tabFile` SET file_url=%s, folder=%s,
-            old_parent=%s, content_hash=%s WHERE name=%s""", (
-            file_url, 'Home/Attachments', 'Home/Attachments', key, doc.name))
+            old_parent=%s, content_hash=%s, is_private=%s WHERE name=%s""", (
+            file_url, 'Home/Attachments', 'Home/Attachments', key, is_private, doc.name))
 
         doc.file_url = file_url
+        doc.is_private = is_private
 
         if parent_doctype and frappe.get_meta(parent_doctype).get('image_field'):
             frappe.db.set_value(parent_doctype, parent_name, frappe.get_meta(parent_doctype).get('image_field'), file_url)
@@ -270,13 +275,14 @@ def upload_existing_files_s3(name, file_name):
             file_path = site_path + '/public' + path
         else:
             file_path = site_path + path
+        is_private = 0 if should_store_public(doc, file_path) else 1
         key = s3_upload.upload_files_to_s3_with_key(
             file_path, doc.file_name,
-            doc.is_private, parent_doctype,
+            is_private, parent_doctype,
             parent_name
         )
 
-        if doc.is_private:
+        if is_private:
             method = "frappe_s3_attachment.controller.generate_file"
             file_url = """/api/method/{0}?key={1}""".format(method, key)
         else:
@@ -287,8 +293,8 @@ def upload_existing_files_s3(name, file_name):
             )
         os.remove(file_path)
         doc = frappe.db.sql("""UPDATE `tabFile` SET file_url=%s, folder=%s,
-            old_parent=%s, content_hash=%s WHERE name=%s""", (
-            file_url, 'Home/Attachments', 'Home/Attachments', key, doc.name))
+            old_parent=%s, content_hash=%s, is_private=%s WHERE name=%s""", (
+            file_url, 'Home/Attachments', 'Home/Attachments', key, is_private, doc.name))
         frappe.db.commit()
     else:
         pass
