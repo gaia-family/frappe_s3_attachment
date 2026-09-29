@@ -52,7 +52,9 @@ signed-URL `file_url`:
 2. The record it is attached to exists and the uploader can write to it (for a record
    not yet saved, the uploader can create that DocType).
 3. It is a local upload, not a reference to a remote URL.
-4. Its bytes decode as a PNG, JPEG or WebP image of 5 MB or less. SVG is not accepted.
+4. Its bytes are a PNG, JPEG, WebP, GIF or AVIF image of 5 MB or less. SVG is not accepted.
+   AVIF is decoded when the installed Pillow can read it; on Pillow 10 (Frappe v15) its
+   container structure is checked instead.
    An upload to an allowlisted field that fails this check is rejected with an error.
 
 An existing private File cannot be switched to public; upload it again instead.

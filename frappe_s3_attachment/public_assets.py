@@ -15,8 +15,9 @@ these hold, and is uploaded as private otherwise:
 2. The record it is attached to exists and the uploading user may write to it (or, for a
    record that has not been saved yet, may create that DocType).
 3. It is a local upload, not a reference to a remote URL.
-4. Its bytes decode as a PNG, JPEG or WebP image of at most 5 MB. A File that fails only
-   this check is rejected outright, so an uploader who meant to publish a logo sees why.
+4. Its bytes are a PNG, JPEG, WebP, GIF or AVIF image of at most 5 MB. A File that
+   fails only this check is rejected outright, so an uploader who meant to publish a
+   logo sees why.
 """
 from __future__ import annotations
 
@@ -89,7 +90,8 @@ def should_store_public(doc: File, file_path: str) -> bool:
     if not is_allowed_public_image(file_path):
         frappe.throw(
             frappe._(
-                "Public images must be PNG, JPEG or WebP files of {0} MB or less."
+                "Public images must be PNG, JPEG, WebP, GIF or AVIF files of {0} MB "
+                "or less."
             ).format(PUBLIC_IMAGE_MAX_BYTES // (1024 * 1024)),
             title=frappe._("Invalid Image"),
         )
