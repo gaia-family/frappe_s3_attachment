@@ -3,17 +3,16 @@
 
 Kept free of Frappe imports so it can be unit tested on its own.
 """
-from __future__ import unicode_literals
-
 import os
+from typing import Final
 
 from PIL import Image
 
-PUBLIC_IMAGE_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
-PUBLIC_IMAGE_MAX_BYTES = 5 * 1024 * 1024
+PUBLIC_IMAGE_FORMATS: Final = frozenset({"PNG", "JPEG", "WEBP"})
+PUBLIC_IMAGE_MAX_BYTES: Final = 5 * 1024 * 1024
 
 
-def is_allowed_public_image(file_path):
+def is_allowed_public_image(file_path: str) -> bool:
     """True only for a PNG, JPEG or WebP of at most PUBLIC_IMAGE_MAX_BYTES that decodes.
 
     The format comes from decoding the bytes, never from the file name or extension, so a

@@ -18,7 +18,9 @@ these hold, and is uploaded as private otherwise:
 4. Its bytes decode as a PNG, JPEG or WebP image of at most 5 MB. A File that fails only
    this check is rejected outright, so an uploader who meant to publish a logo sees why.
 """
-from __future__ import unicode_literals
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Final
 
 import frappe
 
@@ -27,14 +29,17 @@ from frappe_s3_attachment.image_check import (
     is_allowed_public_image,
 )
 
-PUBLIC_ASSET_FIELDS_HOOK = "s3_public_asset_fields"
-REMOTE_URL_PREFIXES = ("http://", "https://", "/api/method/")
+if TYPE_CHECKING:
+    from frappe.core.doctype.file.file import File
+
+PUBLIC_ASSET_FIELDS_HOOK: Final = "s3_public_asset_fields"
+REMOTE_URL_PREFIXES: Final = ("http://", "https://", "/api/method/")
 # Frappe Desk names an unsaved record "new-<doctype-slug>-<random>" while it is being
 # filled in, and file uploads made on it carry that name.
-UNSAVED_RECORD_PREFIX = "new-"
+UNSAVED_RECORD_PREFIX: Final = "new-"
 
 
-def get_public_asset_fields():
+def get_public_asset_fields() -> dict[str, set[str]]:
     """Return {doctype: set(fieldnames)} merged from every app's hook."""
     configured = frappe.get_hooks(PUBLIC_ASSET_FIELDS_HOOK, default={}) or {}
     return {
@@ -44,17 +49,17 @@ def get_public_asset_fields():
     }
 
 
-def is_public_asset_field(doctype, fieldname):
+def is_public_asset_field(doctype: str | None, fieldname: str | None) -> bool:
     if not doctype or not fieldname:
         return False
     return fieldname in get_public_asset_fields().get(doctype, set())
 
 
-def is_remote_reference(file_url):
-    return bool(file_url) and file_url.startswith(REMOTE_URL_PREFIXES)
+def is_remote_reference(file_url: str | None) -> bool:
+    return file_url is not None and file_url.startswith(REMOTE_URL_PREFIXES)
 
 
-def uploader_can_edit_target(doctype, name):
+def uploader_can_edit_target(doctype: str, name: str | None) -> bool:
     if not name:
         return False
     meta = frappe.get_meta(doctype)
@@ -67,7 +72,7 @@ def uploader_can_edit_target(doctype, name):
     return False
 
 
-def should_store_public(doc, file_path):
+def should_store_public(doc: File, file_path: str) -> bool:
     """True if this not-private File may be uploaded as a public S3 object.
 
     Throws when the File is headed for an allowlisted field but is not an acceptable
@@ -91,7 +96,7 @@ def should_store_public(doc, file_path):
     return True
 
 
-def prevent_making_file_public(doc, method=None):
+def prevent_making_file_public(doc: File, method: str | None = None) -> None:
     """File validate hook: an existing private File can never be switched to public.
 
     Public or private is decided once, at upload. Flipping the flag later would not move
