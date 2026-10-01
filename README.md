@@ -28,9 +28,50 @@ Frappe app to make file upload automatically upload and read from s3.
 2. Enter (Bucket Name, AWS key, AWS secret, S3 bucket Region name, Folder Name)
     Folder Name- folder name is the default folder path in s3.
 3. Migrate existing files lets all the existing files in private and public folders
-    to be migrated to s3.
+    to be migrated to s3. Only a System Manager can run it.
 4. Delete From Cloud when selected deletes the file form s3 bucket whenever a file
     is deleted from ui. By default the Delete from cloud will be unchecked.
+
+#### Public files
+
+Unticking "Is Private" does not by itself make a file public. A File is uploaded as a
+public object only when every one of these holds; otherwise it is stored private, with a
+signed-URL `file_url`:
+
+1. An installed app lists its (DocType, field) pair in the `s3_public_asset_fields` hook.
+   With no hook configured, nothing is ever public.
+
+    ```python
+    # your_app/hooks.py
+    s3_public_asset_fields = {
+        "Clinic": ["logo", "image"],
+        "Letter Head": ["image", "footer_image"],
+    }
+    ```
+
+2. The record it is attached to exists and the uploader can write to it (for a record
+   not yet saved, the uploader can create that DocType).
+3. It is a local upload, not a reference to a remote URL.
+4. Its bytes are a PNG, JPEG, WebP, GIF or AVIF image of 5 MB or less. SVG is not accepted.
+   AVIF is decoded when the installed Pillow can read it; on Pillow 10 (Frappe v15) its
+   container structure is checked instead, and an AVIF carrying EXIF or XMP, or with
+   bytes after its last box, is refused.
+   An upload to an allowlisted field that fails this check is rejected with an error.
+
+A file that passes is re-encoded before it is uploaded, so the public object holds only
+the image. EXIF (including GPS), XMP, comments, text chunks and any bytes appended after
+the image (a phone's "motion photo" video, or a polyglot payload) are dropped. The color
+profile, transparency and animation are kept, a photo whose EXIF says it is rotated is
+turned upright, and a JPEG is re-encoded with its own quantization tables. AVIF is
+uploaded as it is, having passed the checks above.
+
+Changing "Is Private" on a stored file:
+
+* Private to public is refused for every file. Upload the image again instead, so it goes
+  through the checks above.
+* Public to private, on a public S3 object, makes the object private, switches the File's
+  `file_url` to the signed private URL, and updates any attachment field on the attached
+  record that held the old URL.
 
 ##### S3 Configuration
 
