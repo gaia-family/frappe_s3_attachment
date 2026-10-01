@@ -18,6 +18,9 @@ these hold, and is uploaded as private otherwise:
 4. Its bytes are a PNG, JPEG, WebP, GIF or AVIF image of at most 5 MB. A File that
    fails only this check is rejected outright, so an uploader who meant to publish a
    logo sees why.
+
+A File that passes is re-encoded before upload (image_check.sanitize_public_image), so
+the public object carries no EXIF, GPS, comments or bytes appended after the image.
 """
 from __future__ import annotations
 
@@ -98,18 +101,15 @@ def should_store_public(doc: File, file_path: str) -> bool:
     return True
 
 
-def prevent_making_file_public(doc: File, method: str | None = None) -> None:
-    """File validate hook: an existing private File can never be switched to public.
+def is_public_s3_object(file_url: str | None, key: str | None) -> bool:
+    """True if file_url is the public URL of the S3 object stored under key.
 
-    Public or private is decided once, at upload. Flipping the flag later would not move
-    the S3 object anyway, so the File would claim to be public while its object stayed
-    private (or the reverse). Upload the image again instead.
+    A public upload's URL is the object's own S3 address, ending in its key, which the
+    File keeps in content_hash.
     """
-    previous = doc.get_doc_before_save()
-    if previous and previous.is_private and not doc.is_private:
-        frappe.throw(
-            frappe._(
-                "A private file cannot be made public. Upload the image again instead."
-            ),
-            title=frappe._("File Must Stay Private"),
-        )
+    return bool(
+        file_url
+        and key
+        and file_url.startswith("https://")
+        and file_url.endswith("/" + key)
+    )
