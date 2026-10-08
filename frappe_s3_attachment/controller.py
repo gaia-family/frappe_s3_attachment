@@ -16,6 +16,15 @@ import frappe
 
 import magic
 
+from frappe_s3_attachment.image_check import sanitize_public_image
+from frappe_s3_attachment.public_assets import (
+    is_public_s3_object,
+    should_store_public,
+)
+
+PRIVATE_FILE_METHOD = "frappe_s3_attachment.controller.generate_file"
+ATTACHMENT_FIELD_TYPES = ("Attach", "Attach Image")
+
 
 class S3Operations(object):
 
@@ -139,6 +148,15 @@ class S3Operations(object):
             frappe.throw(frappe._("File Upload Failed. Please try again."))
         return key
 
+    def make_object_private(self, key):
+        """Remove public read access from an existing object."""
+        try:
+            self.S3_CLIENT.put_object_acl(
+                Bucket=self.BUCKET, Key=key, ACL='private'
+            )
+        except ClientError:
+            frappe.throw(frappe._("Could not make the file private. Please try again."))
+
     def delete_from_s3(self, key):
         """Delete file from s3"""
         self.s3_settings_doc = frappe.get_doc(
@@ -207,19 +225,22 @@ def file_upload_to_s3(doc, method):
     parent_name = doc.attached_to_name
     ignore_s3_upload_for_doctype = frappe.local.conf.get('ignore_s3_upload_for_doctype') or ['Data Import']
     if parent_doctype not in ignore_s3_upload_for_doctype:
+        # Where Frappe wrote the bytes depends on the flag the File arrived with.
         if not doc.is_private:
             file_path = site_path + '/public' + path
         else:
             file_path = site_path + path
+        is_private = 0 if should_store_public(doc, file_path) else 1
+        if not is_private:
+            sanitize_public_image(file_path)
         key = s3_upload.upload_files_to_s3_with_key(
             file_path, doc.file_name,
-            doc.is_private, parent_doctype,
+            is_private, parent_doctype,
             parent_name
         )
 
-        if doc.is_private:
-            method = "frappe_s3_attachment.controller.generate_file"
-            file_url = """/api/method/{0}?key={1}&file_name={2}""".format(method, key, doc.file_name)
+        if is_private:
+            file_url = private_file_url(key, doc.file_name)
         else:
             file_url = '{}/{}/{}'.format(
                 s3_upload.S3_CLIENT.meta.endpoint_url,
@@ -228,15 +249,90 @@ def file_upload_to_s3(doc, method):
             )
         os.remove(file_path)
         frappe.db.sql("""UPDATE `tabFile` SET file_url=%s, folder=%s,
-            old_parent=%s, content_hash=%s WHERE name=%s""", (
-            file_url, 'Home/Attachments', 'Home/Attachments', key, doc.name))
+            old_parent=%s, content_hash=%s, is_private=%s WHERE name=%s""", (
+            file_url, 'Home/Attachments', 'Home/Attachments', key, is_private, doc.name))
 
         doc.file_url = file_url
+        doc.is_private = is_private
 
         if parent_doctype and frappe.get_meta(parent_doctype).get('image_field'):
             frappe.db.set_value(parent_doctype, parent_name, frappe.get_meta(parent_doctype).get('image_field'), file_url)
 
         frappe.db.commit()
+
+
+def private_file_url(key, file_name):
+    """The URL Frappe serves a private S3 object from, through a signed redirect."""
+    return """/api/method/{0}?key={1}&file_name={2}""".format(
+        PRIVATE_FILE_METHOD, key, file_name
+    )
+
+
+def handle_privacy_change(doc, method=None):
+    """File before_validate hook: keep is_private and the S3 object in step.
+
+    Frappe's own handling moves a file between the public and private folders on disk,
+    which S3 files are not in, so ticking or unticking "Is Private" on one would fail.
+
+    - Private to public is refused for every File: whether a file may be public is
+      decided once, at upload, by the allowlist. Upload the image again instead.
+    - Public to private, for a public S3 object, makes the object private, points the
+      File and the record it is attached to at the signed private URL, and skips
+      Frappe's File.validate for this save, since everything it would move is done.
+      Other Files are left to Frappe.
+    """
+    if doc.is_new():
+        return
+    previous = doc.get_doc_before_save()
+    if not previous or bool(previous.is_private) == bool(doc.is_private):
+        return
+
+    if previous.is_private:
+        frappe.throw(
+            frappe._(
+                "A private file cannot be made public. Upload the image again instead."
+            ),
+            title=frappe._("File Must Stay Private"),
+        )
+
+    if not is_public_s3_object(previous.file_url, previous.content_hash):
+        return
+
+    key = previous.content_hash
+    S3Operations().make_object_private(key)
+    new_url = private_file_url(key, doc.file_name)
+    repoint_attached_fields(doc, previous.file_url, new_url)
+    doc.file_url = new_url
+    doc.flags.ignore_validate = True
+
+
+def repoint_attached_fields(doc, old_url, new_url):
+    """Update every attachment field on the attached record that still holds old_url."""
+    if not doc.attached_to_doctype or not doc.attached_to_name:
+        return
+    meta = frappe.get_meta(doc.attached_to_doctype)
+    fieldnames = [
+        field.fieldname for field in meta.fields
+        if field.fieldtype in ATTACHMENT_FIELD_TYPES
+    ]
+    if not fieldnames:
+        return
+
+    if meta.issingle:
+        for fieldname in fieldnames:
+            if frappe.db.get_single_value(doc.attached_to_doctype, fieldname) == old_url:
+                frappe.db.set_single_value(doc.attached_to_doctype, fieldname, new_url)
+        return
+
+    values = frappe.db.get_value(
+        doc.attached_to_doctype, doc.attached_to_name, fieldnames, as_dict=True
+    ) or {}
+    for fieldname, value in values.items():
+        if value == old_url:
+            frappe.db.set_value(
+                doc.attached_to_doctype, doc.attached_to_name, fieldname, new_url,
+                update_modified=False,
+            )
 
 
 @frappe.whitelist()
@@ -270,14 +366,17 @@ def upload_existing_files_s3(name, file_name):
             file_path = site_path + '/public' + path
         else:
             file_path = site_path + path
+        is_private = 0 if should_store_public(doc, file_path) else 1
+        if not is_private:
+            sanitize_public_image(file_path)
         key = s3_upload.upload_files_to_s3_with_key(
             file_path, doc.file_name,
-            doc.is_private, parent_doctype,
+            is_private, parent_doctype,
             parent_name
         )
 
-        if doc.is_private:
-            method = "frappe_s3_attachment.controller.generate_file"
+        if is_private:
+            method = PRIVATE_FILE_METHOD
             file_url = """/api/method/{0}?key={1}""".format(method, key)
         else:
             file_url = '{}/{}/{}'.format(
@@ -287,8 +386,8 @@ def upload_existing_files_s3(name, file_name):
             )
         os.remove(file_path)
         doc = frappe.db.sql("""UPDATE `tabFile` SET file_url=%s, folder=%s,
-            old_parent=%s, content_hash=%s WHERE name=%s""", (
-            file_url, 'Home/Attachments', 'Home/Attachments', key, doc.name))
+            old_parent=%s, content_hash=%s, is_private=%s WHERE name=%s""", (
+            file_url, 'Home/Attachments', 'Home/Attachments', key, is_private, doc.name))
         frappe.db.commit()
     else:
         pass
@@ -309,6 +408,7 @@ def migrate_existing_files():
     """
     Function to migrate the existing files to s3.
     """
+    frappe.only_for("System Manager")
     # get_all_files_from_public_folder_and_upload_to_s3
     files_list = frappe.get_all(
         'File',
