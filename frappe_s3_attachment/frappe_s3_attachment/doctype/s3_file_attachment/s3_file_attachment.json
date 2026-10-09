@@ -335,6 +335,30 @@
    "unique": 0
   }, 
   {
+   "description": "Where images on fields allowlisted by the s3_public_asset_fields hook are stored. Leave empty to store them as public-read objects in the bucket above.", 
+   "fieldname": "public_assets_section", 
+   "fieldtype": "Section Break", 
+   "label": "Public Assets"
+  }, 
+  {
+   "description": "A bucket with ACLs disabled that only the CDN below can read.", 
+   "fieldname": "public_bucket_name", 
+   "fieldtype": "Data", 
+   "label": "Public Bucket Name"
+  }, 
+  {
+   "description": "The CDN address public objects are served from, e.g. https://assets.example.com. A public file's URL is this followed by its key.", 
+   "fieldname": "public_base_url", 
+   "fieldtype": "Data", 
+   "label": "Public Base URL"
+  }, 
+  {
+   "description": "Used to clear the cached copy when a public file is made private. Optional.", 
+   "fieldname": "public_distribution_id", 
+   "fieldtype": "Data", 
+   "label": "CloudFront Distribution ID"
+  }, 
+  {
    "allow_bulk_edit": 0, 
    "allow_in_quick_entry": 0, 
    "allow_on_submit": 0, 
@@ -408,7 +432,7 @@
  "issingle": 1, 
  "istable": 0, 
  "max_attachments": 0, 
- "modified": "2018-06-14 16:26:10.781922", 
+ "modified": "2026-10-09 16:00:00.000000", 
  "modified_by": "shridhar.p@zerodha.com", 
  "module": "Frappe S3 Attachment", 
  "name": "S3 File Attachment", 
