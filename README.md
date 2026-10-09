@@ -71,9 +71,35 @@ Changing "Is Private" on a stored file:
   through the checks above.
 * Public to private, on a public S3 object, makes the object private, switches the File's
   `file_url` to the signed private URL, and updates any attachment field on the attached
-  record that held the old URL.
+  record that held the old URL. An object in the public-assets bucket (below) is moved
+  into the attachments bucket and its cached copy is cleared from the CDN; if clearing
+  fails, the file is still made private and the user is warned that cached copies may
+  stay reachable until they expire. A public-read object in the attachments bucket has
+  its ACL set to private.
 
-##### S3 Configuration
+#### Public-assets bucket
+
+Public images can live in their own bucket, served through a CDN, so that the attachments
+bucket never needs to allow public access. Set these in "S3 File Attachment":
+
+* Public Bucket Name: a bucket with ACLs disabled (`BucketOwnerEnforced`) and all Block
+  Public Access settings on, readable only by the CDN (for CloudFront, through Origin
+  Access Control).
+* Public Base URL: the CDN address, e.g. `https://assets.example.com`. A public file's
+  `file_url` is this followed by its key.
+* CloudFront Distribution ID (optional): lets the app clear a cached copy when a public
+  file is made private.
+
+With both the bucket and the base URL set, public uploads go to that bucket with no ACL.
+With either missing, they are public-read objects in the attachments bucket, as before.
+Deletes go to whichever bucket the file's URL points at, so files from both setups keep
+working side by side.
+
+The credentials the app runs with need, on the public-assets bucket, `s3:PutObject`,
+`s3:GetObject` and `s3:DeleteObject` (plus `s3:ListBucket` on the bucket), and
+`cloudfront:CreateInvalidation` on the distribution.
+
+##### S3 Configuration (attachments bucket, without a public-assets bucket)
 
 1. Permission Overview (Based on requirements)
 
