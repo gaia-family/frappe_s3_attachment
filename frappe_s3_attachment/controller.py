@@ -6,7 +6,7 @@ import random
 import re
 import string
 import uuid
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import boto3
 
@@ -442,7 +442,8 @@ def keys_to_invalidate(text, base_url):
     """Parse one key or public URL per line into a deduplicated list of keys."""
     keys = []
     for line in (text or "").splitlines():
-        value = line.strip()
+        # A URL copied from a browser arrives percent-encoded; keys are stored decoded.
+        value = unquote(line.strip())
         if not value:
             continue
         if base_url and value.startswith(base_url + "/"):
