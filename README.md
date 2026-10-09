@@ -95,6 +95,12 @@ With either missing, they are public-read objects in the attachments bucket, as 
 Deletes go to whichever bucket the file's URL points at, so files from both setups keep
 working side by side.
 
+With a distribution ID set and saved, the form shows a "Clear CDN Cache" button for a
+System Manager. It takes one object key or public URL per line (a key ending in `*` covers
+every key with that prefix, up to 100 lines) and asks CloudFront to drop its cached copies.
+Use it after replacing or removing an object outside the app, or when an automatic clear
+failed. It never deletes or changes a file.
+
 The credentials the app runs with need, on the public-assets bucket, `s3:PutObject`,
 `s3:GetObject` and `s3:DeleteObject` (plus `s3:ListBucket` on the bucket), and
 `cloudfront:CreateInvalidation` on the distribution.

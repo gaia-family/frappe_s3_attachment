@@ -26,6 +26,8 @@ from frappe_s3_attachment.public_assets import (
 
 PRIVATE_FILE_METHOD = "frappe_s3_attachment.controller.generate_file"
 ATTACHMENT_FIELD_TYPES = ("Attach", "Attach Image")
+# CloudFront allows 3,000 paths in progress per distribution; a form needs far fewer.
+MAX_INVALIDATION_KEYS = 100
 
 
 class S3Operations(object):
@@ -217,13 +219,20 @@ class S3Operations(object):
 
     def invalidate_public_cache(self, key):
         """Ask the CDN to drop its cached copy of key. Returns False if it could not."""
+        return self.invalidate_public_paths([key]) is not None
+
+    def invalidate_public_paths(self, keys):
+        """Ask the CDN to drop its cached copies of keys, each of which may end in *
+        to cover every key with that prefix. Returns the invalidation ID, or None if
+        no distribution is configured or the request failed."""
         if not self.PUBLIC_DISTRIBUTION_ID:
-            return False
+            return None
+        paths = [cdn_path(key) for key in keys]
         try:
-            self._client("cloudfront").create_invalidation(
+            response = self._client("cloudfront").create_invalidation(
                 DistributionId=self.PUBLIC_DISTRIBUTION_ID,
                 InvalidationBatch={
-                    "Paths": {"Quantity": 1, "Items": ["/" + quote(key)]},
+                    "Paths": {"Quantity": len(paths), "Items": paths},
                     "CallerReference": uuid.uuid4().hex,
                 },
             )
@@ -232,8 +241,8 @@ class S3Operations(object):
                 title="frappe_s3_attachment: CloudFront invalidation failed",
                 message=frappe.get_traceback(),
             )
-            return False
-        return True
+            return None
+        return response["Invalidation"]["Id"]
 
     def _client(self, service):
         if self.s3_settings_doc.aws_key and self.s3_settings_doc.aws_secret:
@@ -420,6 +429,68 @@ def repoint_attached_fields(doc, old_url, new_url):
                 doc.attached_to_doctype, doc.attached_to_name, fieldname, new_url,
                 update_modified=False,
             )
+
+
+def cdn_path(key):
+    """The CloudFront invalidation path for key. A trailing * stays a wildcard."""
+    if key.endswith("*"):
+        return "/" + quote(key[:-1]) + "*"
+    return "/" + quote(key)
+
+
+def keys_to_invalidate(text, base_url):
+    """Parse one key or public URL per line into a deduplicated list of keys."""
+    keys = []
+    for line in (text or "").splitlines():
+        value = line.strip()
+        if not value:
+            continue
+        if base_url and value.startswith(base_url + "/"):
+            value = value[len(base_url) + 1:]
+        elif value.startswith(("http://", "https://")):
+            frappe.throw(
+                frappe._("{0} is not served from {1}.").format(value, base_url),
+                title=frappe._("Not a Public Asset"),
+            )
+        value = value.lstrip("/")
+        if "*" in value[:-1]:
+            frappe.throw(
+                frappe._("{0}: a * may only end a key.").format(value),
+                title=frappe._("Invalid Key"),
+            )
+        if value not in keys:
+            keys.append(value)
+    if not keys:
+        frappe.throw(frappe._("Enter at least one key or URL."))
+    if len(keys) > MAX_INVALIDATION_KEYS:
+        frappe.throw(
+            frappe._("Clear at most {0} keys at a time, or use a key ending in *.")
+            .format(MAX_INVALIDATION_KEYS)
+        )
+    return keys
+
+
+@frappe.whitelist(methods=["POST"])
+def invalidate_public_assets(keys):
+    """Clear the CDN's cached copies of public assets, given one key or URL per line.
+
+    For an object replaced or removed outside the app, or a cached copy that outlived a
+    failed invalidation. Only clears caches: it never deletes or changes an object.
+    """
+    frappe.only_for("System Manager")
+    s3 = S3Operations()
+    if not s3.PUBLIC_DISTRIBUTION_ID:
+        frappe.throw(frappe._("Set the CloudFront Distribution ID first."))
+    parsed = keys_to_invalidate(keys, s3.PUBLIC_BASE_URL)
+    invalidation_id = s3.invalidate_public_paths(parsed)
+    if not invalidation_id:
+        frappe.throw(
+            frappe._("CloudFront refused the request. See the Error Log for details.")
+        )
+    return {
+        "invalidation_id": invalidation_id,
+        "paths": [cdn_path(key) for key in parsed],
+    }
 
 
 @frappe.whitelist()
