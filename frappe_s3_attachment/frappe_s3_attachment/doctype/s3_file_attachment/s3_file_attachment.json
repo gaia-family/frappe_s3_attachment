@@ -433,7 +433,7 @@
  "istable": 0, 
  "max_attachments": 0, 
  "modified": "2026-10-09 16:00:00.000000", 
- "modified_by": "shridhar.p@zerodha.com", 
+ "modified_by": "vaidik@gaia.family", 
  "module": "Frappe S3 Attachment", 
  "name": "S3 File Attachment", 
  "name_case": "", 

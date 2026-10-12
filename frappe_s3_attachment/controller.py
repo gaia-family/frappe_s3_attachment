@@ -9,6 +9,7 @@ import uuid
 from urllib.parse import quote, unquote
 
 import boto3
+import structlog
 
 from botocore.client import Config
 from botocore.exceptions import BotoCoreError, ClientError
@@ -28,6 +29,8 @@ PRIVATE_FILE_METHOD = "frappe_s3_attachment.controller.generate_file"
 ATTACHMENT_FIELD_TYPES = ("Attach", "Attach Image")
 # CloudFront allows 3,000 paths in progress per distribution; a form needs far fewer.
 MAX_INVALIDATION_KEYS = 100
+
+logger = structlog.get_logger(__name__)
 
 
 class S3Operations(object):
@@ -225,12 +228,22 @@ class S3Operations(object):
         CloudFront refuses the request; callers decide whether that is fatal.
         """
         paths = [cdn_path(key) for key in keys]
-        self._client("cloudfront").create_invalidation(
+        # CloudFront requires a unique reference per request. Nothing stores it: the
+        # log line below is what ties a request to the invalidation it created.
+        caller_reference = uuid.uuid4().hex
+        response = self._client("cloudfront").create_invalidation(
             DistributionId=self.PUBLIC_DISTRIBUTION_ID,
             InvalidationBatch={
                 "Paths": {"Quantity": len(paths), "Items": paths},
-                "CallerReference": uuid.uuid4().hex,
+                "CallerReference": caller_reference,
             },
+        )
+        logger.info(
+            "cloudfront_invalidation_created",
+            distribution_id=self.PUBLIC_DISTRIBUTION_ID,
+            invalidation_id=response["Invalidation"]["Id"],
+            caller_reference=caller_reference,
+            paths=paths,
         )
 
     def _client(self, service):
