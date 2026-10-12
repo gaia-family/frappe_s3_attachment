@@ -454,10 +454,14 @@ def keys_to_invalidate(text, base_url):
         if base_url and value.startswith(base_url + "/"):
             value = value[len(base_url) + 1:]
         elif value.startswith(("http://", "https://")):
-            frappe.throw(
-                frappe._("{0} is not served from {1}.").format(value, base_url),
-                title=frappe._("Not a Public Asset"),
-            )
+            if base_url:
+                message = frappe._("{0} is not served from {1}.").format(value, base_url)
+            else:
+                message = frappe._(
+                    "{0} is a URL, but no Public Base URL is set, so enter the object "
+                    "key instead."
+                ).format(value)
+            frappe.throw(message, title=frappe._("Not a Public Asset"))
         value = value.lstrip("/")
         if "*" in value[:-1]:
             frappe.throw(
