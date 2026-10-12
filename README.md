@@ -30,7 +30,9 @@ Frappe app to make file upload automatically upload and read from s3.
 3. Migrate existing files lets all the existing files in private and public folders
     to be migrated to s3. Only a System Manager can run it.
 4. Delete From Cloud when selected deletes the file form s3 bucket whenever a file
-    is deleted from ui. By default the Delete from cloud will be unchecked.
+    is deleted from ui. By default the Delete from cloud will be unchecked. Files in the
+    public-assets bucket (below) are always deleted, whatever this setting says. A file's
+    object is kept while another File still points at the same URL.
 
 #### Public files
 
@@ -93,7 +95,9 @@ bucket never needs to allow public access. Set these in "S3 File Attachment":
 With both the bucket and the base URL set, public uploads go to that bucket with no ACL.
 With either missing, they are public-read objects in the attachments bucket, as before.
 Deletes go to whichever bucket the file's URL points at, so files from both setups keep
-working side by side.
+working side by side. A file deleted from the public-assets bucket is always removed, even
+with Delete From Cloud unchecked, since anything left there stays publicly readable, and
+its cached copy is cleared from the CDN the same way as for a file made private.
 
 With a distribution ID set and saved, the form shows a "Clear CDN Cache" button for a
 System Manager. It takes one object key or public URL per line (a key ending in `*` covers

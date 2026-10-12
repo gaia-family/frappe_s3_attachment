@@ -257,16 +257,31 @@ class S3Operations(object):
         return boto3.client(service, region_name=self.s3_settings_doc.region_name)
 
     def delete_from_s3(self, key, file_url=None):
-        """Delete file from s3, from whichever bucket file_url says holds it."""
-        if self.s3_settings_doc.delete_file_from_cloud:
-            if self.is_in_public_assets_bucket(file_url):
-                bucket = self.PUBLIC_BUCKET
-            else:
-                bucket = self.BUCKET
-            try:
-                self.S3_CLIENT.delete_object(Bucket=bucket, Key=key)
-            except ClientError:
-                frappe.throw(frappe._("Access denied: Could not delete file"))
+        """Delete file from s3, from whichever bucket file_url says holds it.
+
+        An object in the public-assets bucket is always deleted, and its cached copy
+        cleared from the CDN, since anything left there stays publicly readable. One in
+        the attachments bucket is deleted only when "Delete File From Cloud" is set.
+        """
+        in_public_bucket = self.is_in_public_assets_bucket(file_url)
+        if in_public_bucket:
+            bucket = self.PUBLIC_BUCKET
+        elif self.s3_settings_doc.delete_file_from_cloud:
+            bucket = self.BUCKET
+        else:
+            return
+        try:
+            self.S3_CLIENT.delete_object(Bucket=bucket, Key=key)
+        except ClientError:
+            frappe.throw(frappe._("Access denied: Could not delete file"))
+        if in_public_bucket:
+            clear_cached_copy(
+                self, key,
+                frappe._(
+                    "The file is deleted, but copies cached by the CDN may stay "
+                    "reachable at its address for up to a day."
+                ),
+            )
 
     def read_file_from_s3(self, key):
         """
@@ -387,24 +402,13 @@ def handle_privacy_change(doc, method=None):
     s3 = S3Operations()
     if s3.is_in_public_assets_bucket(previous.file_url):
         s3.move_to_private_bucket(key)
-        # The object is already out of the public bucket, so a failed cache clear
-        # warns rather than undoing the move.
-        cache_cleared = False
-        if s3.PUBLIC_DISTRIBUTION_ID:
-            try:
-                s3.invalidate_public_paths([key])
-                cache_cleared = True
-            except (BotoCoreError, ClientError):
-                log_invalidation_failure()
-        if not cache_cleared:
-            frappe.msgprint(
-                frappe._(
-                    "The file is now private, but copies cached by the CDN may stay "
-                    "reachable at the old address for up to a day."
-                ),
-                title=frappe._("Cached Copies Not Cleared"),
-                indicator="orange",
-            )
+        clear_cached_copy(
+            s3, key,
+            frappe._(
+                "The file is now private, but copies cached by the CDN may stay "
+                "reachable at the old address for up to a day."
+            ),
+        )
     else:
         s3.make_object_private(key)
     new_url = private_file_url(key, doc.file_name)
@@ -440,6 +444,25 @@ def repoint_attached_fields(doc, old_url, new_url):
                 doc.attached_to_doctype, doc.attached_to_name, fieldname, new_url,
                 update_modified=False,
             )
+
+
+def clear_cached_copy(s3, key, warning):
+    """Ask the CDN to drop its cached copy of key, warning the user if that fails.
+
+    Called once the object is already out of the public bucket, so a failed clear
+    warns rather than undoing the change.
+    """
+    if s3.PUBLIC_DISTRIBUTION_ID:
+        try:
+            s3.invalidate_public_paths([key])
+            return
+        except (BotoCoreError, ClientError):
+            log_invalidation_failure()
+    frappe.msgprint(
+        warning,
+        title=frappe._("Cached Copies Not Cleared"),
+        indicator="orange",
+    )
 
 
 def log_invalidation_failure():
@@ -598,7 +621,11 @@ def migrate_existing_files():
 
 
 def delete_from_cloud(doc, method):
-    """Delete file from s3"""
+    """Delete file from s3, unless another File still points at the same object."""
+    if doc.file_url and frappe.db.exists(
+        "File", {"file_url": doc.file_url, "name": ["!=", doc.name]}
+    ):
+        return
     s3 = S3Operations()
     s3.delete_from_s3(doc.content_hash, doc.file_url)
 
