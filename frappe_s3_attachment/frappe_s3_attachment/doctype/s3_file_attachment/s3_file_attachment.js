@@ -51,8 +51,8 @@ function clear_cdn_cache(frm) {
 						title: __("Cache Clearing Started"),
 						indicator: "green",
 						message: __(
-							"CloudFront invalidation {0} covers {1} path(s). It usually finishes within a few minutes.",
-							[r.message.invalidation_id, r.message.paths.length]
+							"CloudFront is clearing {0} path(s). It usually finishes within a few minutes.",
+							[r.message.paths.length]
 						),
 					});
 				},

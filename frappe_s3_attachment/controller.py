@@ -217,32 +217,21 @@ class S3Operations(object):
         except ClientError:
             frappe.throw(frappe._("Could not make the file private. Please try again."))
 
-    def invalidate_public_cache(self, key):
-        """Ask the CDN to drop its cached copy of key. Returns False if it could not."""
-        return self.invalidate_public_paths([key]) is not None
-
     def invalidate_public_paths(self, keys):
         """Ask the CDN to drop its cached copies of keys, each of which may end in *
-        to cover every key with that prefix. Returns the invalidation ID, or None if
-        no distribution is configured or the request failed."""
-        if not self.PUBLIC_DISTRIBUTION_ID:
-            return None
+        to cover every key with that prefix.
+
+        Needs PUBLIC_DISTRIBUTION_ID. Raises BotoCoreError or ClientError if
+        CloudFront refuses the request; callers decide whether that is fatal.
+        """
         paths = [cdn_path(key) for key in keys]
-        try:
-            response = self._client("cloudfront").create_invalidation(
-                DistributionId=self.PUBLIC_DISTRIBUTION_ID,
-                InvalidationBatch={
-                    "Paths": {"Quantity": len(paths), "Items": paths},
-                    "CallerReference": uuid.uuid4().hex,
-                },
-            )
-        except (BotoCoreError, ClientError):
-            frappe.log_error(
-                title="frappe_s3_attachment: CloudFront invalidation failed",
-                message=frappe.get_traceback(),
-            )
-            return None
-        return response["Invalidation"]["Id"]
+        self._client("cloudfront").create_invalidation(
+            DistributionId=self.PUBLIC_DISTRIBUTION_ID,
+            InvalidationBatch={
+                "Paths": {"Quantity": len(paths), "Items": paths},
+                "CallerReference": uuid.uuid4().hex,
+            },
+        )
 
     def _client(self, service):
         if self.s3_settings_doc.aws_key and self.s3_settings_doc.aws_secret:
@@ -385,7 +374,16 @@ def handle_privacy_change(doc, method=None):
     s3 = S3Operations()
     if s3.is_in_public_assets_bucket(previous.file_url):
         s3.move_to_private_bucket(key)
-        if not s3.invalidate_public_cache(key):
+        # The object is already out of the public bucket, so a failed cache clear
+        # warns rather than undoing the move.
+        cache_cleared = False
+        if s3.PUBLIC_DISTRIBUTION_ID:
+            try:
+                s3.invalidate_public_paths([key])
+                cache_cleared = True
+            except (BotoCoreError, ClientError):
+                log_invalidation_failure()
+        if not cache_cleared:
             frappe.msgprint(
                 frappe._(
                     "The file is now private, but copies cached by the CDN may stay "
@@ -429,6 +427,13 @@ def repoint_attached_fields(doc, old_url, new_url):
                 doc.attached_to_doctype, doc.attached_to_name, fieldname, new_url,
                 update_modified=False,
             )
+
+
+def log_invalidation_failure():
+    frappe.log_error(
+        title="frappe_s3_attachment: CloudFront invalidation failed",
+        message=frappe.get_traceback(),
+    )
 
 
 def cdn_path(key):
@@ -483,15 +488,14 @@ def invalidate_public_assets(keys):
     if not s3.PUBLIC_DISTRIBUTION_ID:
         frappe.throw(frappe._("Set the CloudFront Distribution ID first."))
     parsed = keys_to_invalidate(keys, s3.PUBLIC_BASE_URL)
-    invalidation_id = s3.invalidate_public_paths(parsed)
-    if not invalidation_id:
+    try:
+        s3.invalidate_public_paths(parsed)
+    except (BotoCoreError, ClientError):
+        log_invalidation_failure()
         frappe.throw(
             frappe._("CloudFront refused the request. See the Error Log for details.")
         )
-    return {
-        "invalidation_id": invalidation_id,
-        "paths": [cdn_path(key) for key in parsed],
-    }
+    return {"paths": [cdn_path(key) for key in parsed]}
 
 
 @frappe.whitelist()
