@@ -79,6 +79,18 @@ Changing "Is Private" on a stored file:
   stay reachable until they expire. A public-read object in the attachments bucket has
   its ACL set to private.
 
+#### Private files
+
+A private File's `file_url` is `/api/method/frappe_s3_attachment.controller.generate_file?key=...`,
+which redirects to a short-lived signed S3 URL. It signs the key only when the current user
+can read a File that stores it (by `content_hash` or by that `file_url`), under Frappe's
+File permissions: for an attached File, read access to the record it is attached to.
+Anyone else gets a permission error.
+
+An app endpoint that has already checked access by its own rules (a portal serving a
+document to its owner, say) calls `redirect_to_signed_url(key, file_name)` instead, which
+signs without a File check. Do not expose that function directly over HTTP.
+
 #### Public-assets bucket
 
 Public images can live in their own bucket, served through a CDN, so that the attachments
