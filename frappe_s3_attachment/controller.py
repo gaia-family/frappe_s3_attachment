@@ -540,17 +540,53 @@ def invalidate_public_assets(keys):
 
 @frappe.whitelist()
 def generate_file(key=None, file_name=None):
+    """Redirect to a signed URL for a private S3 object, if the user may read it.
+
+    This is the URL stored in a private File's file_url. It signs the key only when the
+    current user can read at least one File that points at it: the File's own
+    permission rules apply, which for an attached File means read access to the
+    record it is attached to. Without the check, any logged-in user who learned a key
+    could download the object.
+
+    Code that has already decided the user may see an object (a portal endpoint that
+    checks its own access rules, say) calls redirect_to_signed_url instead.
     """
-    Function to stream file from s3.
-    """
-    if key:
-        s3_upload = S3Operations()
-        signed_url = s3_upload.get_url(key, file_name)
-        frappe.local.response["type"] = "redirect"
-        frappe.local.response["location"] = signed_url
-    else:
+    if not key:
         frappe.local.response['body'] = "Key not found."
-    return
+        return
+    if not can_read_object(key):
+        raise frappe.PermissionError(
+            frappe._("You do not have access to this file.")
+        )
+    redirect_to_signed_url(key, file_name)
+
+
+def redirect_to_signed_url(key, file_name=None):
+    """Send the current response to a signed URL for KEY. Checks no permissions."""
+    s3_upload = S3Operations()
+    signed_url = s3_upload.get_url(key, file_name)
+    frappe.local.response["type"] = "redirect"
+    frappe.local.response["location"] = signed_url
+
+
+def can_read_object(key):
+    """Whether the current user can read a File that stores KEY.
+
+    A File stores its key in content_hash (set at upload) and in its private file_url.
+    Either is enough, so a File whose content_hash was later rewritten still counts.
+    """
+    url_prefix = private_file_url(key, "")
+    like_pattern = (
+        url_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    )
+    names = frappe.db.sql_list(
+        """SELECT name FROM `tabFile`
+        WHERE content_hash = %s OR file_url LIKE %s""",
+        (key, like_pattern),
+    )
+    return any(
+        frappe.has_permission("File", "read", doc=name) for name in names
+    )
 
 
 def upload_existing_files_s3(name, file_name):
